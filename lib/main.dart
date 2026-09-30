@@ -5,12 +5,15 @@ import 'package:intl/intl.dart';
 
 import 'classifier.dart';
 import 'models/disease_data.dart';
+import 'screens/login_screen.dart';
+import 'services/auth_service.dart';
 import 'services/history_service.dart';
 import 'services/language_service.dart';
 import 'services/tts_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AuthService.init();
   await LanguageService.instance.init();
   await TtsService.init();
   runApp(const CoffeeDiseaseApp());
@@ -52,7 +55,13 @@ class _CoffeeDiseaseAppState extends State<CoffeeDiseaseApp> {
           centerTitle: true,
         ),
       ),
-      home: const MainNavigationScreen(),
+      home: AuthService.isLoggedIn
+          ? const MainNavigationScreen()
+          : LoginScreen(
+              onLoginSuccess: () {
+                setState(() {});
+              },
+            ),
     );
   }
 }
@@ -99,6 +108,42 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
+  void _confirmLogout() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('መውጣት (Logout)'),
+        content: const Text('ከአካውንትዎ መውጣት ይፈልጋሉ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('አይ (Cancel)'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await AuthService.logout();
+              Navigator.pop(ctx);
+              if (mounted) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => LoginScreen(
+                      onLoginSuccess: () {
+                        setState(() {});
+                      },
+                    ),
+                  ),
+                );
+              }
+            },
+            child: const Text('ውጣ (Logout)', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screens = [
@@ -107,17 +152,19 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       const DiseaseGuideScreen(),
     ];
 
+    final user = AuthService.currentUser;
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
           children: [
             Text(
               _lang.t('app_title'),
-              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             Text(
-              _lang.t('app_subtitle'),
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              user != null ? '👤 ${user.name} (${user.farmLocation})' : _lang.t('app_subtitle'),
+              style: const TextStyle(fontSize: 11, color: Colors.white70),
             ),
           ],
         ),
@@ -126,6 +173,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             icon: const Icon(Icons.language_rounded),
             tooltip: _lang.t('select_language'),
             onPressed: _showLanguageDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded),
+            tooltip: 'Logout',
+            onPressed: _confirmLogout,
           ),
         ],
       ),
@@ -159,7 +211,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
-// 1. Scanner Screen
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
 
@@ -171,6 +222,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   final ImagePicker _picker = ImagePicker();
   final CoffeeClassifier _classifier = CoffeeClassifier();
   final LanguageService _lang = LanguageService.instance;
+  final ScrollController _scrollController = ScrollController();
 
   File? _selectedImage;
   PredictionResult? _result;
@@ -186,6 +238,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   void dispose() {
     _classifier.close();
     TtsService.stop();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -207,7 +260,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
       final result = await _classifier.classifyImage(_selectedImage!);
 
-      if (result != null) {
+      if (result != null && result.isValidLeaf) {
         await HistoryService.saveScan(
           imagePath: pickedFile.path,
           diseaseKey: result.label,
@@ -219,6 +272,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
         _result = result;
         _isClassifying = false;
       });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            270.0,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     } catch (e) {
       setState(() {
         _isClassifying = false;
@@ -227,7 +290,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   void _speakDiagnosis() {
-    if (_result == null) return;
+    if (_result == null || !_result!.isValidLeaf) return;
     final info = CoffeeDiseaseDatabase.get(_result!.label);
     final text = "${info.getName(_lang.currentLanguage)}. "
         "${_lang.t('confidence')}: ${(_result!.confidence * 100).toStringAsFixed(0)}%. "
@@ -257,12 +320,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
+      controller: _scrollController,
       padding: const EdgeInsets.all(16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            height: 260,
+            height: 250,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
@@ -306,7 +370,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.spa_rounded, size: 70, color: Colors.green.shade300),
+                        Icon(Icons.spa_rounded, size: 68, color: Colors.green.shade300),
                         const SizedBox(height: 10),
                         Text(
                           _lang.t('empty_picker_title'),
@@ -362,9 +426,55 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ],
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
-          if (_result != null) ...[
+          // 1. INVALID PHOTO ALERT (IF NON-COFFEE LEAF DETECTED)
+          if (_result != null && !_result!.isValidLeaf) ...[
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.amber.shade400, width: 1.5),
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 52, color: Colors.amber.shade900),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'ትክክለኛ የቡና ቅጠል ፎቶ አይደለም!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF7A4100),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _result!.validationMessage ??
+                        'የተነሳው ፎቶ የቡና ቅጠል መሆኑ አልተረጋገጠም። እባክዎ ካሜራውን ወደ ቡና ቅጠሉ አስጠግተው በደንብ የሚያሳይ ፎቶ ያንሱ።',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, height: 1.4, color: Colors.amber.shade900),
+                  ),
+                  const SizedBox(height: 14),
+                  ElevatedButton.icon(
+                    onPressed: () => _pickImage(ImageSource.camera),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('እንደገና ፎቶ አንሳ (Retake)'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber.shade800,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // 2. VALID PREDICTION CARD (DISPLAYED IN-PLACE IMMEDIATELY)
+          if (_result != null && _result!.isValidLeaf) ...[
             Builder(builder: (context) {
               final diseaseInfo = CoffeeDiseaseDatabase.get(_result!.label);
               final localizedName = diseaseInfo.getName(_lang.currentLanguage);
@@ -372,7 +482,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
               return Card(
                 elevation: 3,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                 color: Colors.white,
                 child: Padding(
                   padding: const EdgeInsets.all(18.0),
@@ -520,291 +630,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
               );
             }),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-// 2. History Screen
-class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key});
-
-  @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
-}
-
-class _HistoryScreenState extends State<HistoryScreen> {
-  final LanguageService _lang = LanguageService.instance;
-  List<ScanRecord> _records = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final list = await HistoryService.getHistory();
-    setState(() {
-      _records = list;
-      _isLoading = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
-
-    if (_records.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.history_toggle_off_rounded, size: 64, color: Colors.grey.shade400),
-            const SizedBox(height: 10),
-            Text(_lang.t('no_history'), style: TextStyle(color: Colors.grey.shade600)),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '${_records.length} ${_lang.t('tab_history')}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              TextButton.icon(
-                onPressed: () async {
-                  await HistoryService.clearHistory();
-                  _load();
-                },
-                icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
-                label: Text(_lang.t('clear_history'), style: const TextStyle(color: Colors.red)),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: _records.length,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemBuilder: (context, index) {
-              final item = _records[index];
-              final info = CoffeeDiseaseDatabase.get(item.diseaseKey);
-              final localizedName = info.getName(_lang.currentLanguage);
-              final dateStr = DateFormat('MMM d, y • h:mm a').format(item.timestamp);
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: ListTile(
-                  leading: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: File(item.imagePath).existsSync()
-                        ? Image.file(File(item.imagePath), width: 48, height: 48, fit: BoxFit.cover)
-                        : Container(width: 48, height: 48, color: Colors.grey.shade300, child: const Icon(Icons.spa)),
-                  ),
-                  title: Text(localizedName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: Text(dateStr, style: const TextStyle(fontSize: 11)),
-                  trailing: Text(
-                    '${(item.confidence * 100).toStringAsFixed(0)}%',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E5E3A)),
-                  ),
-                  onTap: () {
-                    showModalBottomSheet(
-                      context: context,
-                      isScrollControlled: true,
-                      backgroundColor: Colors.transparent,
-                      builder: (ctx) => TreatmentBottomSheet(info: info),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// 3. Disease Guide Screen
-class DiseaseGuideScreen extends StatelessWidget {
-  const DiseaseGuideScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final lang = LanguageService.instance;
-    final list = CoffeeDiseaseDatabase.diseases.values.toList();
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: list.length,
-      itemBuilder: (context, index) {
-        final info = list[index];
-        final name = info.getName(lang.currentLanguage);
-
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          elevation: 2,
-          child: ExpansionTile(
-            leading: Icon(
-              info.key == 'Healthy' ? Icons.check_circle_rounded : Icons.warning_rounded,
-              color: info.key == 'Healthy' ? Colors.green.shade700 : Colors.amber.shade800,
-            ),
-            title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-            subtitle: Text(info.key, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _header(lang.t('symptoms'), Icons.visibility_outlined),
-                    Text(info.getSymptoms(lang.currentLanguage), style: const TextStyle(fontSize: 13)),
-                    const SizedBox(height: 10),
-
-                    _header(lang.t('causes'), Icons.info_outline),
-                    Text(info.getCauses(lang.currentLanguage), style: const TextStyle(fontSize: 13)),
-                    const SizedBox(height: 10),
-
-                    _header(lang.t('organic_care'), Icons.eco_outlined),
-                    Text(info.getOrganicCare(lang.currentLanguage), style: const TextStyle(fontSize: 13)),
-                    const SizedBox(height: 10),
-
-                    _header(lang.t('chemical_treatment'), Icons.science_outlined),
-                    Text(info.getChemicalTreatment(lang.currentLanguage), style: const TextStyle(fontSize: 13)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _header(String title, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 3.0),
-      child: Row(
-        children: [
-          Icon(icon, size: 15, color: const Color(0xFF1E5E3A)),
-          const SizedBox(width: 6),
-          Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1E5E3A)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// 4. Treatment Bottom Sheet
-class TreatmentBottomSheet extends StatelessWidget {
-  final DiseaseInfo info;
-  const TreatmentBottomSheet({super.key, required this.info});
-
-  @override
-  Widget build(BuildContext context) {
-    final lang = LanguageService.instance;
-    final name = info.getName(lang.currentLanguage);
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (_, controller) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: const EdgeInsets.all(20),
-          child: ListView(
-            controller: controller,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          style: const TextStyle(
-                            fontSize: 19,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E5E3A),
-                          ),
-                        ),
-                        Text(info.key, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const Divider(height: 20),
-
-              _card(lang.t('symptoms'), info.getSymptoms(lang.currentLanguage), Icons.visibility_outlined, Colors.blue.shade800),
-              _card(lang.t('causes'), info.getCauses(lang.currentLanguage), Icons.help_outline_rounded, Colors.purple.shade800),
-              _card(lang.t('organic_care'), info.getOrganicCare(lang.currentLanguage), Icons.eco_rounded, Colors.green.shade800),
-              _card(lang.t('chemical_treatment'), info.getChemicalTreatment(lang.currentLanguage), Icons.science_rounded, Colors.deepOrange.shade800),
-              _card(lang.t('prevention'), info.getPrevention(lang.currentLanguage), Icons.shield_outlined, Colors.teal.shade800),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _card(String title, String content, IconData icon, Color color) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 18),
-              const SizedBox(width: 8),
-              Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: color)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(content, style: const TextStyle(fontSize: 13, height: 1.4, color: Color(0xFF2D3748))),
         ],
       ),
     );
