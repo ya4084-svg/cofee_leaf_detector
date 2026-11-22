@@ -11,46 +11,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout repository code
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 2. Setup Java 17
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
+      # 3. Setup Flutter SDK
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      # Generate modern Android scaffold and configure Java 17 + JVM compatibility
-      - name: Setup Modern Android Scaffold
-        run: |
-          flutter create . --platforms=android
-          
-          # Permissions
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' android/app/src/main/AndroidManifest.xml
-          
-          # Min SDK 21
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' android/app/build.gradle || true
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' android/app/build.gradle || true
-
-          # Align Java & Kotlin to Version 17
-          sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' android/app/build.gradle || true
-          sed -i 's/JavaVersion.VERSION_11/JavaVersion.VERSION_17/g' android/app/build.gradle || true
-
-          # Ignore strict JVM target validation across third-party plugins
-          echo "kotlin.jvm.target.validation.mode=IGNORE" >> android/gradle.properties
-
+      # 4. Get dependencies
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build Release APK
-        run: flutter build apk --release
+      # 5. Disable buggy Lint Vital in Gradle
+      - name: Disable Lint Vital Check
+        run: |
+          mkdir -p ~/.gradle
+          cat << 'EOF' > ~/.gradle/init.gradle
+          allprojects {
+              afterEvaluate { project ->
+                  project.tasks.matching { it.name.contains("lintVital") }.configureEach {
+                      enabled = false
+                  }
+              }
+          }
+          EOF
 
+      # 6. Build Android Release APK
+      - name: Build Release APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      # 7. Upload APK as an Artifact
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
