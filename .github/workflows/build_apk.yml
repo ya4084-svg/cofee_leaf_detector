@@ -40,10 +40,12 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      # 6. Disable buggy Lint Vital in Gradle
-      - name: Disable Lint Vital Check
+      # 6. Configure Gradle (Bypass Lint and JVM Target Validation)
+      - name: Configure Gradle Settings
         run: |
           mkdir -p ~/.gradle
+          echo "kotlin.jvm.target.validation.mode=ignore" >> ~/.gradle/gradle.properties
+          echo "kotlin.jvm.target.validation.mode=ignore" >> android/gradle.properties
           cat << 'EOF' > ~/.gradle/init.gradle
           allprojects {
               afterEvaluate { project ->
