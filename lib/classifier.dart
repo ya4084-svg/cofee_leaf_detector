@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -40,7 +41,6 @@ class CoffeeClassifier {
   /// Load model and labels from assets
   Future<void> loadModel() async {
     try {
-      // 1. Try loading coffee_leaf_model.tflite first (the new 224x224 model)
       try {
         _interpreter = await Interpreter.fromAsset('assets/coffee_leaf_model.tflite');
       } catch (e) {
@@ -51,7 +51,6 @@ class CoffeeClassifier {
         }
       }
 
-      // 2. Load labels
       try {
         final labelData = await rootBundle.loadString('assets/labels.txt');
         _labels = labelData
@@ -71,57 +70,32 @@ class CoffeeClassifier {
     }
   }
 
-  /// Classify image with dynamic input shape detection
+  /// Classify image with dynamic input shape & Softmax
   Future<PredictionResult?> classifyImage(File imageFile) async {
     try {
       if (_interpreter == null) {
         await loadModel();
-        if (_interpreter == null) {
-          print('CoffeeClassifier: Interpreter is null!');
-          return null;
-        }
+        if (_interpreter == null) return null;
       }
 
       final Uint8List imageBytes = await imageFile.readAsBytes();
       final img.Image? originalImage = img.decodeImage(imageBytes);
       if (originalImage == null) return null;
 
-      // Dynamically get model input dimensions (224x224 for EfficientNet)
-      final inputShape = _interpreter!.getInputTensor(0).shape;
+      // Dynamically get input shape (224x224 for EfficientNet)
+      final inputTensor = _interpreter!.getInputTensor(0);
+      final inputShape = inputTensor.shape;
       final int inputHeight = (inputShape.length > 1) ? inputShape[1] : 224;
       final int inputWidth = (inputShape.length > 2) ? inputShape[2] : 224;
 
-      // 1. Direct Resize to model dimensions
+      // 1. Resize directly to model input dimensions
       final img.Image resizedImage = img.copyResize(
         originalImage,
         width: inputWidth,
         height: inputHeight,
       );
 
-      // 2. Botanical Pre-Check
-      int foliagePixels = 0;
-      int totalSampled = 0;
-      for (int y = 0; y < resizedImage.height; y += 4) {
-        for (int x = 0; x < resizedImage.width; x += 4) {
-          final pixel = resizedImage.getPixel(x, y);
-          final r = pixel.r;
-          final g = pixel.g;
-          final b = pixel.b;
-          totalSampled++;
-
-          final isGreenish = (g > r * 0.80 && g > b * 1.10 && g > 25);
-          final isYellowBrownRust = (r > 35 && g > 30 && b < (r + g) * 0.50);
-          final isDarkFoliage = (g >= b && r >= b && (r + g + b) > 30 && (r + g + b) < 420);
-
-          if (isGreenish || isYellowBrownRust || isDarkFoliage) {
-            foliagePixels++;
-          }
-        }
-      }
-
-      final double foliageRatio = totalSampled > 0 ? (foliagePixels / totalSampled) : 0.0;
-
-      // 3. Raw 0-255 float32 input tensor for EfficientNetB0
+      // 2. Preprocess into 4D tensor [1, 224, 224, 3] with raw 0-255 float32
       var input = List.generate(
         1,
         (_) => List.generate(
@@ -140,14 +114,27 @@ class CoffeeClassifier {
         ),
       );
 
-      final outputShape = _interpreter!.getOutputTensor(0).shape;
+      final outputTensor = _interpreter!.getOutputTensor(0);
+      final outputShape = outputTensor.shape;
       final int numClasses = (outputShape.length > 1) ? outputShape[1] : _labels.length;
       var output = List.generate(1, (_) => List<double>.filled(numClasses, 0.0));
 
-      // 4. Run inference
+      // 3. Run model inference
       _interpreter!.run(input, output);
 
-      final List<double> probabilities = output[0];
+      List<double> rawOutput = List<double>.from(output[0]);
+
+      // 4. Apply Softmax normalization for accurate probabilities
+      double sum = rawOutput.fold(0.0, (prev, elem) => prev + elem);
+      List<double> probabilities;
+      if ((sum - 1.0).abs() > 0.05 || rawOutput.any((val) => val < 0.0)) {
+        double maxLogit = rawOutput.reduce((a, b) => a > b ? a : b);
+        List<double> expValues = rawOutput.map((val) => math.exp(val - maxLogit)).toList();
+        double sumExp = expValues.fold(0.0, (prev, elem) => prev + elem);
+        probabilities = expValues.map((val) => val / sumExp).toList();
+      } else {
+        probabilities = rawOutput;
+      }
 
       int maxIndex = 0;
       double maxProb = -1.0;
@@ -167,22 +154,14 @@ class CoffeeClassifier {
       final topLabel = maxIndex < _labels.length ? _labels[maxIndex] : 'Unknown';
       final amharicName = amharicNames[topLabel] ?? topLabel;
 
-      bool isValid = true;
-      String? validationMsg;
-
-      // Check if image has leaf characteristics
-      if (foliageRatio < 0.15 || maxProb < 0.40) {
-        isValid = false;
-        validationMsg = 'ትክክለኛ የቡና ቅጠል ፎቶ አይደለም ወይም በቂ ብርሃን የለውም!\nእባክዎ ካሜራውን ወደ ቡና ቅጠሉ አስጠግተው በድጋሚ ፎቶ ያንሱ።';
-      }
-
+      // Always show diagnosis directly!
       return PredictionResult(
         label: topLabel,
         amharicLabel: amharicName,
         confidence: maxProb,
         allScores: allScores,
-        isValidLeaf: isValid,
-        validationMessage: validationMsg,
+        isValidLeaf: true,
+        validationMessage: null,
       );
     } catch (e) {
       print('CoffeeClassifier error: $e');
