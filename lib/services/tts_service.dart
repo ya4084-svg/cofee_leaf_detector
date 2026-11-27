@@ -12,17 +12,9 @@ class TtsService {
       await _flutterTts.setVolume(1.0);
       await _flutterTts.setPitch(1.0);
 
-      _flutterTts.setStartHandler(() {
-        isSpeaking = true;
-      });
-
-      _flutterTts.setCompletionHandler(() {
-        isSpeaking = false;
-      });
-
-      _flutterTts.setErrorHandler((msg) {
-        isSpeaking = false;
-      });
+      _flutterTts.setStartHandler(() => isSpeaking = true);
+      _flutterTts.setCompletionHandler(() => isSpeaking = false);
+      _flutterTts.setErrorHandler((msg) => isSpeaking = false);
 
       _isInitialized = true;
     } catch (e) {

@@ -1,7 +1,7 @@
 name: coffee_leaf_app
 description: "Coffee Leaf Disease Detector Mobile Application"
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -25,3 +25,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/coffee_leaf_model.tflite
+    - assets/labels.txt

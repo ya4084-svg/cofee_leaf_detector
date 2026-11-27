@@ -11,36 +11,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository code
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Setup Java 17
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # 3. Setup Flutter SDK
-      - name: Setup Flutter
+      - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      # 4. Recreate clean Android files with official modern v2 embedding
       - name: Recreate Modern Android Project
         run: |
           rm -rf android
           flutter create . --platforms=android
           sed -i '/<manifest/a \    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />' android/app/src/main/AndroidManifest.xml
 
-      # 5. Install Dependencies
       - name: Install Dependencies
         run: flutter pub get
 
-      # 6. Configure Gradle (Bypass Lint and JVM Target Validation)
       - name: Configure Gradle Settings
         run: |
           mkdir -p ~/.gradle
@@ -56,11 +50,9 @@ jobs:
           }
           EOF
 
-      # 7. Build Android Release APK
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
 
-      # 8. Upload APK as an Artifact
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:

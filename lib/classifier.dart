@@ -38,7 +38,6 @@ class CoffeeClassifier {
     'Phoma': 'ፎማ (የቅጠል ጫፍ መድረቅ)',
   };
 
-  /// Load model and labels from assets
   Future<void> loadModel() async {
     try {
       try {
@@ -70,7 +69,6 @@ class CoffeeClassifier {
     }
   }
 
-  /// Classify image with dynamic input shape & Softmax
   Future<PredictionResult?> classifyImage(File imageFile) async {
     try {
       if (_interpreter == null) {
@@ -82,20 +80,17 @@ class CoffeeClassifier {
       final img.Image? originalImage = img.decodeImage(imageBytes);
       if (originalImage == null) return null;
 
-      // Dynamically get input shape (224x224 for EfficientNet)
       final inputTensor = _interpreter!.getInputTensor(0);
       final inputShape = inputTensor.shape;
       final int inputHeight = (inputShape.length > 1) ? inputShape[1] : 224;
       final int inputWidth = (inputShape.length > 2) ? inputShape[2] : 224;
 
-      // 1. Resize directly to model input dimensions
       final img.Image resizedImage = img.copyResize(
         originalImage,
         width: inputWidth,
         height: inputHeight,
       );
 
-      // 2. Preprocess into 4D tensor [1, 224, 224, 3] with raw 0-255 float32
       var input = List.generate(
         1,
         (_) => List.generate(
@@ -119,12 +114,11 @@ class CoffeeClassifier {
       final int numClasses = (outputShape.length > 1) ? outputShape[1] : _labels.length;
       var output = List.generate(1, (_) => List<double>.filled(numClasses, 0.0));
 
-      // 3. Run model inference
       _interpreter!.run(input, output);
 
       List<double> rawOutput = List<double>.from(output[0]);
 
-      // 4. Apply Softmax normalization for accurate probabilities
+      // Softmax normalization
       double sum = rawOutput.fold(0.0, (prev, elem) => prev + elem);
       List<double> probabilities;
       if ((sum - 1.0).abs() > 0.05 || rawOutput.any((val) => val < 0.0)) {
@@ -154,7 +148,6 @@ class CoffeeClassifier {
       final topLabel = maxIndex < _labels.length ? _labels[maxIndex] : 'Unknown';
       final amharicName = amharicNames[topLabel] ?? topLabel;
 
-      // Always show diagnosis directly!
       return PredictionResult(
         label: topLabel,
         amharicLabel: amharicName,

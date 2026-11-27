@@ -41,12 +41,12 @@ class LanguageService extends ChangeNotifier {
       'en': 'Disease Guide',
     },
     'take_photo': {
-      'am': 'ካሜራ (Camera)',
+      'am': 'ካሜራ',
       'om': 'Kaameraa',
       'en': 'Camera',
     },
     'pick_gallery': {
-      'am': 'ጋለሪ (Gallery)',
+      'am': 'ጋለሪ',
       'om': 'Gaalerii',
       'en': 'Gallery',
     },
@@ -86,9 +86,9 @@ class LanguageService extends ChangeNotifier {
       'en': 'Symptoms',
     },
     'causes': {
-      'am': 'የበሽታው አመጣጥ / መንስኤ',
+      'am': 'የበሽታው መንስኤ',
       'om': 'Sababa Dhukkubichaa',
-      'en': 'Causes & Triggers',
+      'en': 'Causes',
     },
     'organic_care': {
       'am': 'የባህል እና የተፈጥሮ መፍትሄዎች',
@@ -103,7 +103,7 @@ class LanguageService extends ChangeNotifier {
     'prevention': {
       'am': 'የመከላከያ እርምጃዎች',
       'om': 'Tarkaanfii Ittisaa',
-      'en': 'Prevention Measures',
+      'en': 'Prevention',
     },
     'clear_history': {
       'am': 'ታሪክ አጽዳ',

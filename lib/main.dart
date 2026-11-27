@@ -181,11 +181,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       body: screens[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onDestinationSelected: (index) => setState(() => _currentIndex = index),
         destinations: [
           NavigationDestination(
             icon: const Icon(Icons.camera_alt_outlined),
